@@ -1,4 +1,4 @@
-use crate::simd::Simd;
+use crate::simd::{Mask, Select, Simd, cmp::SimdPartialOrd};
 use core::mem;
 
 impl<const N: usize> Simd<u8, N> {
@@ -76,13 +76,23 @@ impl<const N: usize> Simd<u8, N> {
                     transize(swizzler, self, idxs)
                 }
                 _ => {
-                    let mut array = [0; N];
-                    for (i, k) in idxs.to_array().into_iter().enumerate() {
-                        if (k as usize) < N {
-                            array[i] = self[k as usize];
-                        };
+                    use core::intrinsics::simd::simd_extract_dyn;
+                    use core::intrinsics::simd::simd_insert_dyn;
+
+                    let mut dst: Simd<u8, N> = Simd::splat(0);
+                    let clamped_idxs: Simd<u8, N> = idxs % Simd::splat(N as u8);
+                    for i in 0..N {
+                        unsafe {
+                            // SAFETY: i < N is guaranteed by the loop
+                            let idx: u8 = simd_extract_dyn(clamped_idxs, i as u32);
+                            // SAFETY: idx < N is guaranteed by the modulo
+                            let datum: u8 = simd_extract_dyn(self, idx as u32);
+                            // SAFETY: i < N is guaranteed by the loop
+                            dst = simd_insert_dyn(dst, i as u32, datum);
+                        }
                     }
-                    array.into()
+                    let mask: Mask<i8, N> = idxs.simd_lt(Simd::splat(N as u8));
+                    mask.select(dst, Simd::splat(0u8))
                 }
             }
         }
